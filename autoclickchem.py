@@ -170,6 +170,43 @@ class StructureLocateGroups:
                             
         return ThioAcidRoots
     
+    def index_of_alkene_3h(self, pdb): # identify alkenes with three H neighbors
+        """Identifies all the alkene groups of a specified molecular model with 3 hydrogen neighbors.
+        
+        Arguments:
+        pdb -- A molecular model (pymolecule.Molecule).
+        
+        Returns:
+        A list of lists, where each list contains the indices (int) of the atoms present in an identified alkene group.
+        
+        """
+        
+        #  R2       H5
+        #   \      /
+        #    C1 = C4
+        #   /      \
+        #  H3       H6
+        
+        Alkene3HRoots = []
+        AlkeneRoots = self.index_of_alkene(pdb)
+
+        for c1, r2, r3, c4, r5, r6 in AlkeneRoots:
+            nbs = [r2, r3, r5, r6]
+            nbs.sort(key=lambda idx: pdb.all_atoms[idx].element == "H")
+            if pdb.all_atoms[nbs[1]].element != "H":
+                continue
+            ids = nbs if pdb.all_atoms[nbs[0]] == "H" else nbs[:1]
+            for i in ids:
+                tc1, tr2, tr3, tc4, tr5, tr6 = c1, r2, r3, c4, r5, r6
+                if i == r5 or i == r6:
+                    tc1, tr2, tr3, tc4, tr5, tr6 = tc4, tr5, tr6, tc1, tr2, tr3
+                if i == r3 or i == r6:
+                    tr2, tr3, tr5, tr6 = tr3, tr2, tr6, tr5
+                Alkene3HRoots.append([tc1, tr2, tr3, tc4, tr5, tr6])
+
+        return Alkene3HRoots
+            
+
     def index_of_alkene(self, pdb): # identify alkenes (olefins)
         """Identifies all the alkene groups of a specified molecular model.
         
@@ -181,11 +218,11 @@ class StructureLocateGroups:
         
         """
         
-        #  2      5
-        #   \    /
-        #   1 = 4
-        #  /     \
-        # 3       6
+        #  2       5
+        #   \     /
+        #    1 = 4
+        #   /     \
+        #  3       6
         
         # unfortunately, this is going to mess up on things like -C=C-C=C-
         # the middle two will be epoxidated incorrectly.
@@ -1218,7 +1255,7 @@ class StructureLocateGroups:
                             Indices_of_secondary_amines.append(amine_id)
     
         return Indices_of_secondary_amines 
-
+    
 class StericProblemSolver:
     """This module contains functions that are useful for simultaneously manipulating multiple pymolecule.Molecule objects."""
     
@@ -1295,7 +1332,7 @@ class OperatorsReact:
     
     # Here's where the click chemistry is simulated in silico
     
-    def react_molecules(self, pdb1, pdb2, allowed_reaction_types=["azide_and_alkyne_to_azole", "epoxide_alcohol_opening", "epoxide_thiol_opening", "chloroformate_and_amine_to_carbamate", "sulfonyl_azide_and_thio_acid", "carboxylate_and_alcohol_to_ester", "carboxylate_and_thiol_to_thioester", "acyl_halide_and_alcohol_to_ester", "acyl_halide_and_thiol_to_thioester", "ester_and_alcohol_to_ester", "ester_and_thiol_to_thioester", "acid_anhydride_and_alcohol_to_ester", "acid_anhydride_and_thiol_to_thioester", "carboxylate_and_amine_to_amide", "acyl_halide_and_amine_to_amide", "ester_and_amine_to_amide", "acid_anhydride_and_amine_to_amide", "isocyanate_and_amine_to_urea", "isothiocyanate_and_amine_to_thiourea", "isocyanate_and_alcohol_to_carbamate", "isothiocyanate_and_alcohol_to_carbamothioate", "isocyanate_and_thiol_to_carbamothioate", "isothiocyanate_and_thiol_to_carbamodithioate", "alkene_to_epoxide", "halide_to_cyanide", "alcohol_to_cyanide", "carboxylate_to_cyanide", "acyl_halide_to_cyanide", "acid_anhydride_to_cyanide", "halide_to_azide", "alcohol_to_azide", "carboxylate_to_azide", "acyl_halide_to_azide", "acid_anhydride_to_azide", "amine_to_azide", "amine_to_isocyanate", "amine_to_isothiocyanate", "azide_to_amine"]): # pdb1 is the one that will remain stable, pdb2 will be moved.
+    def react_molecules(self, pdb1, pdb2, allowed_reaction_types=["azide_and_alkyne_to_azole", "epoxide_alcohol_opening", "epoxide_thiol_opening", "chloroformate_and_amine_to_carbamate", "sulfonyl_azide_and_thio_acid", "carboxylate_and_alcohol_to_ester", "carboxylate_and_thiol_to_thioester", "acyl_halide_and_alcohol_to_ester", "acyl_halide_and_thiol_to_thioester", "ester_and_alcohol_to_ester", "ester_and_thiol_to_thioester", "acid_anhydride_and_alcohol_to_ester", "acid_anhydride_and_thiol_to_thioester", "carboxylate_and_amine_to_amide", "acyl_halide_and_amine_to_amide", "ester_and_amine_to_amide", "acid_anhydride_and_amine_to_amide", "isocyanate_and_amine_to_urea", "isothiocyanate_and_amine_to_thiourea", "isocyanate_and_alcohol_to_carbamate", "isothiocyanate_and_alcohol_to_carbamothioate", "isocyanate_and_thiol_to_carbamothioate", "isothiocyanate_and_thiol_to_carbamodithioate", "alkene_to_epoxide", "halide_to_cyanide", "alcohol_to_cyanide", "carboxylate_to_cyanide", "acyl_halide_to_cyanide", "acid_anhydride_to_cyanide", "halide_to_azide", "alcohol_to_azide", "carboxylate_to_azide", "acyl_halide_to_azide", "acid_anhydride_to_azide", "amine_to_azide", "amine_to_isocyanate", "amine_to_isothiocyanate", "azide_to_amine", "thiol_and_alkene_to_thioether"]): # pdb1 is the one that will remain stable, pdb2 will be moved.
         """Combines two molecular models into products according to the rules of click chemistry.
         
         Arguments:
@@ -1329,6 +1366,9 @@ class OperatorsReact:
 
         alkene_pdb1 = self.structure_locate_groups.index_of_alkene(pdb1)
         alkene_pdb2 = self.structure_locate_groups.index_of_alkene(pdb2)
+        
+        alkene_3h_pdb1 = self.structure_locate_groups.index_of_alkene_3h(pdb1)
+        alkene_3h_pdb2 = self.structure_locate_groups.index_of_alkene_3h(pdb2)
         
         epoxide_pdb1 = self.structure_locate_groups.index_of_epoxide(pdb1)
         epoxide_pdb2 = self.structure_locate_groups.index_of_epoxide(pdb2)
@@ -1399,7 +1439,18 @@ class OperatorsReact:
     
         # Now compile a list of all the interactions.
         possible_reactions = []
-           
+        
+        if "thiol_and_alkene_to_thioether" in allowed_reaction_types:
+            if len(thiol_pdb1) != 0 and len(alkene_3h_pdb2) != 0:
+                for atoms1 in thiol_pdb1:
+                    for atoms2 in alkene_3h_pdb2:
+                        possible_reactions.append(["THIOL", atoms1, "ALKENE", atoms2])
+            
+            if len(alkene_3h_pdb1) != 0 and len(thiol_pdb2) != 0:
+                for atoms1 in alkene_3h_pdb1:
+                    for atoms2 in thiol_pdb2:
+                        possible_reactions.append(["ALKENE", atoms1, "THIOL", atoms2])
+
         if "azide_and_alkyne_to_azole" in allowed_reaction_types: 
             
             if len(azides_pdb1) != 0 and len(alkyne_pdb2) !=0:
@@ -1891,7 +1942,7 @@ class OperatorsReact:
                 for atoms1 in acid_anhydride_pdb1:
                     if "acid_anhydride_to_azide" in allowed_reaction_types: possible_reactions.append(["acid_anhydride_azide", atoms1])
                     if "acid_anhydride_to_cyanide" in allowed_reaction_types: possible_reactions.append(["acid_anhydride_cyanide", atoms1])
-    
+
         # Now that you've enumerated all possible reactions, pick one of them
         products = []
         for reaction in possible_reactions:
@@ -2273,6 +2324,14 @@ class OperatorsReact:
                     product.remarks.append("SOURCE FILES: " + pdb1_copy.filename + "; " + pdb2_copy.filename)
                     products.append(product)
     
+                elif (reaction[0] == "THIOL" and reaction[2] == "ALKENE") or (reaction[0] == "ALKENE" and reaction[2] == "THIOL"):
+                    pdb1_copy = pdb1.copy_of()
+                    pdb2_copy = pdb2.copy_of()
+                    product = self.__thiol_alkene(pdb1_copy, pdb2_copy, reaction)
+                    product.remarks.append("thiol + alkene => thioether")
+                    product.remarks.append("SOURCE FILES: " + pdb1_copy.filename + "; " + pdb2_copy.filename)
+                    products.append(product)
+
                 # sulfonyl_azide - thio acid reactions
                 elif (reaction[0] == "SULFONYL_AZIDE" and reaction[2] == "THIO_ACID") or (reaction[0] == "THIO_ACID" and reaction[2] == "SULFONYL_AZIDE"): # this one is updated
                     pdb1_copy = pdb1.copy_of()
@@ -2954,6 +3013,81 @@ class OperatorsReact:
         # Now combine all the pdbs into one
         build = intermediate.merge_with_another_molecule(sulfyl_azide)
         build = build.merge_with_another_molecule(thio_acid)
+        
+        return build
+
+    def __thiol_alkene(self, pdb1, pdb2, reaction):
+        """Simulates the reaction between a thiol and an alkene.
+        
+        Arguments:
+        pdb1 -- The first molecular model (pymolecule.Molecule), either a thiol or an alkene.
+        pdb2 -- The other molecular model (pymolecule.Molecule).
+        reaction -- A list identifying the reactive chemical groups and which atoms will participate in the reaction.
+        
+        Returns:
+        A pymolecule.Molecule model of the product.
+        
+        """
+        
+        # First, identify which is which
+        if reaction[0] == "THIOL":
+            thiol = pdb1
+            thiol_C_index = reaction[1][0]
+            thiol_S_index = reaction[1][1]
+            thiol_H_index = reaction[1][2]
+            
+            alkene = pdb2
+            alkene_C1_index = reaction[3][0]
+            alkene_R2_index = reaction[3][1]
+            alkene_H3_index = reaction[3][2]
+            alkene_C4_index = reaction[3][3]
+            alkene_H5_index = reaction[3][4]
+            alkene_H6_index = reaction[3][5]
+        
+        else:
+            thiol = pdb2
+            thiol_C_index = reaction[3][0]
+            thiol_S_index = reaction[3][1]
+            thiol_S_index = reaction[3][2]
+            
+            alkene = pdb1
+            alkene_C1_index = reaction[1][0]
+            alkene_R2_index = reaction[1][1]
+            alkene_H3_index = reaction[1][2]
+            alkene_C4_index = reaction[1][3]
+            alkene_H5_index = reaction[1][4]
+            alkene_H6_index = reaction[1][5]
+            
+        # load intermediate
+        intermediate = pymolecule.Molecule()
+        intermediate.load_pdb('.' + os.sep + 'intermediates.tmp' + os.sep + 'ethanethiol.pdb')
+        
+        # now move the thiol
+        tethers = [[6, thiol_S_index], [5, thiol_C_index]] 
+        thiol = intermediate.align_another_molecule_to_this_one(thiol, tethers)
+    
+        # now move the alkene
+        tethers = [[1, alkene_C1_index], [9, alkene_R2_index]]
+        alkene = intermediate.align_another_molecule_to_this_one(alkene, tethers)
+    
+        # Now delete some of the atoms
+        thiol.delete_atom(thiol_S_index)
+        thiol.delete_atom(thiol_H_index)
+        alkene.delete_atom(alkene_C1_index)
+        alkene.delete_atom(alkene_H3_index)
+        alkene.delete_atom(alkene_C4_index)
+        alkene.delete_atom(alkene_H5_index)
+        alkene.delete_atom(alkene_H6_index)
+        intermediate.delete_atom(5)
+        intermediate.delete_atom(9)
+    
+        intermediate.change_residue('FR1')
+        thiol.change_residue('FR2')
+        alkene.change_residue('FR3')
+    
+        # Now combine all the pdbs into one
+        build = intermediate.merge_with_another_molecule(thiol)
+        build = build.merge_with_another_molecule(alkene)
         
         return build
             
@@ -5911,6 +6045,17 @@ class AutoClickChem:
         f.write("HETATM    7  C7          0      -1.421   2.955   0.167  1.00  0.00           C" + "\n")
         f.write("HETATM    8  C8          0      -2.707   0.834   0.049  1.00  0.00           C" + "\n")
         f.close()
+        f = open('.' + os.sep + 'intermediates.tmp' + os.sep + 'ethanethiol.pdb','w')
+        f.write("HETATM    1  C01         0      -1.307   1.291   0.149  1.00  0.00           C\n")
+        f.write("HETATM    2  C02         0      -1.797   1.398   1.605  1.00  0.00           C\n")
+        f.write("HETATM    3  H03         0      -1.754   2.438   1.928  1.00  0.00           H\n")
+        f.write("HETATM    4  H05         0      -1.162   0.791   2.249  1.00  0.00           H\n")
+        f.write("HETATM    5  H06         0      -3.925   0.849   2.986  1.00  0.00           H\n")
+        f.write("HETATM    6  S01         0      -3.514   0.802   1.712  1.00  0.00           S\n")
+        f.write("HETATM    7  H01         0      -2.092   1.535  -0.504  1.00  0.00           H\n")
+        f.write("HETATM    8  H02         0      -0.984   0.310  -0.040  1.00  0.00           H\n")
+        f.write("HETATM    9  H04         0      -0.508   1.956  -0.000  1.00  0.00           H\n")
+        f.close()
 
     def __get_pdb_files(self, loc, log):
         """Generates a list of PDB files.
@@ -6042,7 +6187,7 @@ class AutoClickChem:
         else:
             log = ""
         
-        kinds_of_reactions = ["azide_and_alkyne_to_azole", "epoxide_alcohol_opening", "epoxide_thiol_opening", "chloroformate_and_amine_to_carbamate", "sulfonyl_azide_and_thio_acid", "carboxylate_and_alcohol_to_ester", "carboxylate_and_thiol_to_thioester", "acyl_halide_and_alcohol_to_ester", "acyl_halide_and_thiol_to_thioester", "ester_and_alcohol_to_ester", "ester_and_thiol_to_thioester", "acid_anhydride_and_alcohol_to_ester", "acid_anhydride_and_thiol_to_thioester", "carboxylate_and_amine_to_amide", "acyl_halide_and_amine_to_amide", "ester_and_amine_to_amide", "acid_anhydride_and_amine_to_amide", "isocyanate_and_amine_to_urea", "isothiocyanate_and_amine_to_thiourea", "isocyanate_and_alcohol_to_carbamate", "isothiocyanate_and_alcohol_to_carbamothioate", "isocyanate_and_thiol_to_carbamothioate", "isothiocyanate_and_thiol_to_carbamodithioate", "alkene_to_epoxide", "halide_to_cyanide", "alcohol_to_cyanide", "carboxylate_to_cyanide", "acyl_halide_to_cyanide", "acid_anhydride_to_cyanide", "halide_to_azide", "alcohol_to_azide", "carboxylate_to_azide", "acyl_halide_to_azide", "acid_anhydride_to_azide", "amine_to_azide", "amine_to_isocyanate", "amine_to_isothiocyanate", "azide_to_amine"]
+        kinds_of_reactions = ["azide_and_alkyne_to_azole", "epoxide_alcohol_opening", "epoxide_thiol_opening", "chloroformate_and_amine_to_carbamate", "sulfonyl_azide_and_thio_acid", "carboxylate_and_alcohol_to_ester", "carboxylate_and_thiol_to_thioester", "acyl_halide_and_alcohol_to_ester", "acyl_halide_and_thiol_to_thioester", "ester_and_alcohol_to_ester", "ester_and_thiol_to_thioester", "acid_anhydride_and_alcohol_to_ester", "acid_anhydride_and_thiol_to_thioester", "carboxylate_and_amine_to_amide", "acyl_halide_and_amine_to_amide", "ester_and_amine_to_amide", "acid_anhydride_and_amine_to_amide", "isocyanate_and_amine_to_urea", "isothiocyanate_and_amine_to_thiourea", "isocyanate_and_alcohol_to_carbamate", "isothiocyanate_and_alcohol_to_carbamothioate", "isocyanate_and_thiol_to_carbamothioate", "isothiocyanate_and_thiol_to_carbamodithioate", "alkene_to_epoxide", "halide_to_cyanide", "alcohol_to_cyanide", "carboxylate_to_cyanide", "acyl_halide_to_cyanide", "acid_anhydride_to_cyanide", "halide_to_azide", "alcohol_to_azide", "carboxylate_to_azide", "acyl_halide_to_azide", "acid_anhydride_to_azide", "amine_to_azide", "amine_to_isocyanate", "amine_to_isothiocyanate", "azide_to_amine", "thiol_and_alkene_to_thioether"]
         
         self.__log_file_output("\nAutoClickChem " + self.version,log)
         self.__log_file_output("\nIf you use AutoClickChem in your research, please cite the following reference:",log)
