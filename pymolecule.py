@@ -82,13 +82,11 @@ class Point:
     def cross_product(self, other_point):
         """Calculates the cross product (pymolecule.Point) of two vectors (pymolecule.Point)."""
         
-        Response = Point()
+        rx = self.y * other_point.z - self.z * other_point.y
+        ry = self.z * other_point.x - self.x * other_point.z
+        rz = self.x * other_point.y - self.y * other_point.x
     
-        Response.x = self.y * other_point.z - self.z * other_point.y
-        Response.y = self.z * other_point.x - self.x * other_point.z
-        Response.z = self.x * other_point.y - self.y * other_point.x
-    
-        return Response
+        return Point(rx, ry, rz)
     
     def normalized(self):
         """Returns a normalized copy (pymolecule.Point) of the specified vector (pymolecule.Point)."""

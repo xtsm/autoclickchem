@@ -1256,6 +1256,134 @@ class StructureLocateGroups:
     
         return Indices_of_secondary_amines 
     
+    def index_of_tetrazine(self, pdb):
+        """Identifies all the 1,2,4,5-tetrazine groups of a specified molecular model.
+        
+        Arguments:
+        pdb -- A molecular model (pymolecule.Molecule).
+        
+        Returns:
+        A list of lists, where each list contains the indices (int) of the atoms present in an identified tetrazine group.
+        
+        """
+
+        #         N = N
+        #        /     \
+        #  R1 - C       C - R2
+        #        \\   //
+        #         N - N
+
+        def find_cnnc(pdb):
+
+            # helper function
+            #
+            #     1     3
+            #      N = N
+            #   2 /     \ 4
+            #  - C       C -
+            #     \     /
+
+            ans = []
+
+            for n1_idx in pdb.all_atoms:
+                n1 = pdb.all_atoms[n1_idx]
+                if n1.element != "N":
+                    continue
+
+                n1_nb = n1.indecies_of_atoms_connecting[:]
+                if len(n1_nb) != 2:
+                    continue
+                n1_nb.sort(key=lambda idx: pdb.all_atoms[idx].element)
+                if pdb.all_atoms[n1_nb[0]].element != "C" or pdb.all_atoms[n1_nb[1]].element != "N":
+                    continue
+                c1_idx, n2_idx = n1_nb
+                if n2_idx < n1_idx:
+                    continue
+                n2 = pdb.all_atoms[n2_idx]
+                n2_nb = n2.indecies_of_atoms_connecting[:]
+                if len(n2_nb) != 2:
+                    continue
+                n2_nb.sort(key=lambda idx: pdb.all_atoms[idx].element)
+                if pdb.all_atoms[n2_nb[0]].element != "C" or pdb.all_atoms[n2_nb[1]].element != "N":
+                    continue
+                c2_idx = n2_nb[0]
+
+                if c1_idx == c2_idx:
+                    continue
+                
+                c1 = pdb.all_atoms[c1_idx]
+                c2 = pdb.all_atoms[c2_idx]
+                if len(c1.indecies_of_atoms_connecting) != 3 or len(c2.indecies_of_atoms_connecting) != 3:
+                    continue
+                a1 = c1.coordinates.angle_between_three_points(n1.coordinates, n2.coordinates)
+                a2 = c2.coordinates.angle_between_three_points(n2.coordinates, n1.coordinates)
+                da = c1.coordinates.dihedral(n1.coordinates, n2.coordinates, c2.coordinates)
+                if abs(a1 - math.pi * 2 / 3) > 0.1 or abs(a2 - math.pi * 2 / 3) > 0.1 or abs(da) > 0.1:
+                    continue
+                ans.append([n1_idx, c1_idx, n2_idx, c2_idx])
+
+            return ans
+
+
+        cnncs = find_cnnc(pdb)
+        ans = []
+        cnnc_by_cc = dict()
+        for n1, c1, n2, c2 in cnncs:
+            if c1 > c2:
+                key = (c2, c1)
+                value = (n2, n1)
+            else:
+                key = (c1, c2)
+                value = (n1, n2)
+            if key in cnnc_by_cc:
+                cnnc_by_cc[key].append(value)
+            else:
+                cnnc_by_cc[key] = [value]
+        for (c1, c2), ns in cnnc_by_cc.iteritems():
+            if len(ns) != 2:
+                continue
+            r1 = pdb.all_atoms[c1].indecies_of_atoms_connecting[:]
+            r1.remove(ns[0][0])
+            r1.remove(ns[1][0])
+            r2 = pdb.all_atoms[c2].indecies_of_atoms_connecting[:]
+            r2.remove(ns[0][1])
+            r2.remove(ns[1][1])
+            ans.append([c1, ns[0][0], ns[0][1], c2, ns[1][1], ns[1][0], r1[0], r2[0]])
+        return ans
+
+
+    def index_of_isonitrile(self, pdb):
+        """Identifies all the isonitrile groups of a specified molecular model.
+        
+        Arguments:
+        pdb -- A molecular model (pymolecule.Molecule).
+        
+        Returns:
+        A list of lists, where each list contains the indices (int) of the atoms present in an identified isonitrile group.
+        
+        """
+        
+        # R - N = C
+            
+        IsonitrileRoots = []
+        
+        for atom_index in pdb.all_atoms:
+            atom = pdb.all_atoms[atom_index]
+            if atom.element=="C" and len(atom.indecies_of_atoms_connecting)==1: # This is the terminal C
+                neighbor1_index = atom.indecies_of_atoms_connecting[0]
+                neighbor1_atom = pdb.all_atoms[neighbor1_index]
+                if neighbor1_atom.element=="N" and len(neighbor1_atom.indecies_of_atoms_connecting)==2: # middle N
+                    indicies = []
+                    for index in neighbor1_atom.indecies_of_atoms_connecting:
+                        indicies.append(index)
+                    indicies.remove(atom_index)
+                    neighbor2_index = indicies[0]
+                    neighbor2_atom = pdb.all_atoms[neighbor2_index]
+                    if neighbor2_atom.element == "C":
+                        IsonitrileRoots.append([neighbor2_index, neighbor1_index, atom_index])
+        return IsonitrileRoots
+
+    
 class StericProblemSolver:
     """This module contains functions that are useful for simultaneously manipulating multiple pymolecule.Molecule objects."""
     
@@ -1332,7 +1460,7 @@ class OperatorsReact:
     
     # Here's where the click chemistry is simulated in silico
     
-    def react_molecules(self, pdb1, pdb2, allowed_reaction_types=["azide_and_alkyne_to_azole", "epoxide_alcohol_opening", "epoxide_thiol_opening", "chloroformate_and_amine_to_carbamate", "sulfonyl_azide_and_thio_acid", "carboxylate_and_alcohol_to_ester", "carboxylate_and_thiol_to_thioester", "acyl_halide_and_alcohol_to_ester", "acyl_halide_and_thiol_to_thioester", "ester_and_alcohol_to_ester", "ester_and_thiol_to_thioester", "acid_anhydride_and_alcohol_to_ester", "acid_anhydride_and_thiol_to_thioester", "carboxylate_and_amine_to_amide", "acyl_halide_and_amine_to_amide", "ester_and_amine_to_amide", "acid_anhydride_and_amine_to_amide", "isocyanate_and_amine_to_urea", "isothiocyanate_and_amine_to_thiourea", "isocyanate_and_alcohol_to_carbamate", "isothiocyanate_and_alcohol_to_carbamothioate", "isocyanate_and_thiol_to_carbamothioate", "isothiocyanate_and_thiol_to_carbamodithioate", "alkene_to_epoxide", "halide_to_cyanide", "alcohol_to_cyanide", "carboxylate_to_cyanide", "acyl_halide_to_cyanide", "acid_anhydride_to_cyanide", "halide_to_azide", "alcohol_to_azide", "carboxylate_to_azide", "acyl_halide_to_azide", "acid_anhydride_to_azide", "amine_to_azide", "amine_to_isocyanate", "amine_to_isothiocyanate", "azide_to_amine", "thiol_and_alkene_to_thioether"]): # pdb1 is the one that will remain stable, pdb2 will be moved.
+    def react_molecules(self, pdb1, pdb2, allowed_reaction_types=["azide_and_alkyne_to_azole", "epoxide_alcohol_opening", "epoxide_thiol_opening", "chloroformate_and_amine_to_carbamate", "sulfonyl_azide_and_thio_acid", "carboxylate_and_alcohol_to_ester", "carboxylate_and_thiol_to_thioester", "acyl_halide_and_alcohol_to_ester", "acyl_halide_and_thiol_to_thioester", "ester_and_alcohol_to_ester", "ester_and_thiol_to_thioester", "acid_anhydride_and_alcohol_to_ester", "acid_anhydride_and_thiol_to_thioester", "carboxylate_and_amine_to_amide", "acyl_halide_and_amine_to_amide", "ester_and_amine_to_amide", "acid_anhydride_and_amine_to_amide", "isocyanate_and_amine_to_urea", "isothiocyanate_and_amine_to_thiourea", "isocyanate_and_alcohol_to_carbamate", "isothiocyanate_and_alcohol_to_carbamothioate", "isocyanate_and_thiol_to_carbamothioate", "isothiocyanate_and_thiol_to_carbamodithioate", "alkene_to_epoxide", "halide_to_cyanide", "alcohol_to_cyanide", "carboxylate_to_cyanide", "acyl_halide_to_cyanide", "acid_anhydride_to_cyanide", "halide_to_azide", "alcohol_to_azide", "carboxylate_to_azide", "acyl_halide_to_azide", "acid_anhydride_to_azide", "amine_to_azide", "amine_to_isocyanate", "amine_to_isothiocyanate", "azide_to_amine", "thiol_and_alkene_to_thioether", "isonitrile_and_tetrazine"]): # pdb1 is the one that will remain stable, pdb2 will be moved.
         """Combines two molecular models into products according to the rules of click chemistry.
         
         Arguments:
@@ -1357,6 +1485,12 @@ class OperatorsReact:
         
         alkyne_pdb1 = self.structure_locate_groups.index_of_alkyne(pdb1)
         alkyne_pdb2 = self.structure_locate_groups.index_of_alkyne(pdb2)
+    
+        isonitrile_pdb1 = self.structure_locate_groups.index_of_isonitrile(pdb1)
+        isonitrile_pdb2 = self.structure_locate_groups.index_of_isonitrile(pdb2)
+    
+        tetrazine_pdb1 = self.structure_locate_groups.index_of_tetrazine(pdb1)
+        tetrazine_pdb2 = self.structure_locate_groups.index_of_tetrazine(pdb2)
     
         sulfonyl_azide_pdb1 = self.structure_locate_groups.index_of_sulfonyl_azide(pdb1)
         sulfonyl_azide_pdb2 = self.structure_locate_groups.index_of_sulfonyl_azide(pdb2)
@@ -1450,6 +1584,15 @@ class OperatorsReact:
                 for atoms1 in alkene_3h_pdb1:
                     for atoms2 in thiol_pdb2:
                         possible_reactions.append(["ALKENE", atoms1, "THIOL", atoms2])
+
+        if "isonitrile_and_tetrazine" in allowed_reaction_types:
+            for atoms1 in isonitrile_pdb1:
+                for atoms2 in tetrazine_pdb2:
+                    possible_reactions.append(["ISONITRILE", atoms1, "TETRAZINE", atoms2])
+
+            for atoms1 in tetrazine_pdb1:
+                for atoms2 in isonitrile_pdb2:
+                    possible_reactions.append(["TETRAZINE", atoms1, "ISONITRILE", atoms2])
 
         if "azide_and_alkyne_to_azole" in allowed_reaction_types: 
             
@@ -2332,6 +2475,14 @@ class OperatorsReact:
                     product.remarks.append("SOURCE FILES: " + pdb1_copy.filename + "; " + pdb2_copy.filename)
                     products.append(product)
 
+                elif (reaction[0] == "ISONITRILE" and reaction[2] == "TETRAZINE") or (reaction[0] == "TETRAZINE" and reaction[2] == "ISONITRILE"):
+                    pdb1_copy = pdb1.copy_of()
+                    pdb2_copy = pdb2.copy_of()
+                    product = self.__isonitrile_tetrazine(pdb1_copy, pdb2_copy, reaction)
+                    product.remarks.append("isonitrile + tetrazine => ???")
+                    product.remarks.append("SOURCE FILES: " + pdb1_copy.filename + "; " + pdb2_copy.filename)
+                    products.append(product)
+
                 # sulfonyl_azide - thio acid reactions
                 elif (reaction[0] == "SULFONYL_AZIDE" and reaction[2] == "THIO_ACID") or (reaction[0] == "THIO_ACID" and reaction[2] == "SULFONYL_AZIDE"): # this one is updated
                     pdb1_copy = pdb1.copy_of()
@@ -3016,6 +3167,91 @@ class OperatorsReact:
         
         return build
 
+    def __isonitrile_tetrazine(self, pdb1, pdb2, reaction):
+        """Simulates the reaction between an isonitrile and a tetrazine.
+        
+        Arguments:
+        pdb1 -- The first molecular model (pymolecule.Molecule), isonitrile.
+        pdb2 -- The other molecular model (pymolecule.Molecule), tetrazine.
+        reaction -- A list identifying the reactive chemical groups and which atoms will participate in the reaction.
+        
+        Returns:
+        A pymolecule.Molecule model of the product.
+        
+        """
+        
+        # First, identify which is which
+        if reaction[0] == "ISONITRILE" and reaction[2] == "TETRAZINE":
+            isonitrile = pdb1
+            isonitrile_R_index = reaction[1][0]
+            isonitrile_N_index = reaction[1][1]
+            isonitrile_C_index = reaction[1][2]
+            
+            tetrazine = pdb2
+            tetrazine_C1_index = reaction[3][0]
+            tetrazine_C2_index = reaction[3][3]
+            tetrazine_R1_index = reaction[3][6]
+            tetrazine_R2_index = reaction[3][7]
+        else:
+            assert reaction[2] == "ISONITRILE" and reaction[0] == "TETRAZINE"
+            isonitrile = pdb2
+            isonitrile_R_index = reaction[3][0]
+            isonitrile_N_index = reaction[3][1]
+            isonitrile_C_index = reaction[3][2]
+            
+            tetrazine = pdb1
+            tetrazine_C1_index = reaction[1][0]
+            tetrazine_C2_index = reaction[1][3]
+            tetrazine_R1_index = reaction[1][6]
+            tetrazine_R2_index = reaction[1][7]
+        # TODO: what happens if R1 and R2 are connected (not via tetrazine ring)? is it even possible?
+        tetrazine_r1 = tetrazine.get_branch(tetrazine_C1_index, tetrazine_R1_index)
+        tetrazine_r2 = tetrazine.get_branch(tetrazine_C2_index, tetrazine_R2_index)
+            
+        # load intermediate
+        intermediate = pymolecule.Molecule()
+        intermediate.load_pdb('.' + os.sep + 'intermediates.tmp' + os.sep + '4p1ca.pdb')
+        
+        # now move the isonitrile
+        tethers = [[4, isonitrile_R_index], [6, isonitrile_N_index]] 
+        isonitrile = intermediate.align_another_molecule_to_this_one(isonitrile, tethers)
+    
+        # now move the tetrazine residues
+        tethers = [[1, tetrazine_C1_index], [9, tetrazine_R1_index]]
+        tetrazine_r1 = intermediate.align_another_molecule_to_this_one(tetrazine_r1, tethers)
+        tethers = [[3, tetrazine_C2_index], [5, tetrazine_R2_index]]
+        tetrazine_r2 = intermediate.align_another_molecule_to_this_one(tetrazine_r2, tethers)
+    
+        
+        item1 = [isonitrile, isonitrile.all_atoms[isonitrile_R_index].coordinates, isonitrile.all_atoms[isonitrile_C_index].coordinates]
+        item2 = [tetrazine_r1, tetrazine_r1.all_atoms[tetrazine_R1_index].coordinates, tetrazine_r1.all_atoms[tetrazine_C1_index].coordinates]
+        item3 = [tetrazine_r2, tetrazine_r2.all_atoms[tetrazine_R2_index].coordinates, tetrazine_r2.all_atoms[tetrazine_C2_index].coordinates]
+        item4 = [intermediate]
+        
+        # Now delete some of the atoms
+        isonitrile.delete_atom(isonitrile_N_index)
+        isonitrile.delete_atom(isonitrile_C_index)
+        tetrazine_r1.delete_atom(tetrazine_C1_index)
+        tetrazine_r2.delete_atom(tetrazine_C2_index)
+        intermediate.delete_atom(4)
+        intermediate.delete_atom(5)
+        intermediate.delete_atom(9)
+        
+        # Reduce steric hindrance
+        self.structure_pdb_functions.reduce_steric_hindrance([item1, item2, item3, item4])
+    
+        intermediate.change_residue('FR1')
+        isonitrile.change_residue('FR2')
+        tetrazine_r1.change_residue('FR3')
+        tetrazine_r2.change_residue('FR3')
+    
+        # Now combine all the pdbs into one
+        build = intermediate.merge_with_another_molecule(isonitrile)
+        build = build.merge_with_another_molecule(tetrazine_r1)
+        build = build.merge_with_another_molecule(tetrazine_r2)
+        
+        return build
+    
     def __thiol_alkene(self, pdb1, pdb2, reaction):
         """Simulates the reaction between a thiol and an alkene.
         
@@ -6056,6 +6292,17 @@ class AutoClickChem:
         f.write("HETATM    8  H02         0      -0.984   0.310  -0.040  1.00  0.00           H\n")
         f.write("HETATM    9  H04         0      -0.508   1.956  -0.000  1.00  0.00           H\n")
         f.close()
+        f = open('.' + os.sep + 'intermediates.tmp' + os.sep + '4p1ca.pdb','w')
+        f.write("HETATM    1  C02         0      -2.508  -1.562  -2.415  1.00  0.00           C\n")
+        f.write("HETATM    2  C03         0      -1.079  -1.228  -2.417  1.00  0.00           C\n")
+        f.write("HETATM    3  C04         0      -0.975   0.106  -2.416  1.00  0.00           C\n")
+        f.write("HETATM    4  H01         0       0.414  -2.518  -3.295  1.00  0.00           H\n")
+        f.write("HETATM    5  H04         0      -0.025   0.640  -2.417  1.00  0.00           H\n")
+        f.write("HETATM    6  N01         0       0.033  -2.190  -2.419  1.00  0.00           N\n")
+        f.write("HETATM    7  N02         0      -3.262  -0.308  -2.413  1.00  0.00           N\n")
+        f.write("HETATM    8  N03         0      -2.289   0.769  -2.413  1.00  0.00           N\n")
+        f.write("HETATM    9  H07         0      -2.936  -2.578  -2.416  1.00  0.00           H\n")
+        f.close()
 
     def __get_pdb_files(self, loc, log):
         """Generates a list of PDB files.
@@ -6187,7 +6434,7 @@ class AutoClickChem:
         else:
             log = ""
         
-        kinds_of_reactions = ["azide_and_alkyne_to_azole", "epoxide_alcohol_opening", "epoxide_thiol_opening", "chloroformate_and_amine_to_carbamate", "sulfonyl_azide_and_thio_acid", "carboxylate_and_alcohol_to_ester", "carboxylate_and_thiol_to_thioester", "acyl_halide_and_alcohol_to_ester", "acyl_halide_and_thiol_to_thioester", "ester_and_alcohol_to_ester", "ester_and_thiol_to_thioester", "acid_anhydride_and_alcohol_to_ester", "acid_anhydride_and_thiol_to_thioester", "carboxylate_and_amine_to_amide", "acyl_halide_and_amine_to_amide", "ester_and_amine_to_amide", "acid_anhydride_and_amine_to_amide", "isocyanate_and_amine_to_urea", "isothiocyanate_and_amine_to_thiourea", "isocyanate_and_alcohol_to_carbamate", "isothiocyanate_and_alcohol_to_carbamothioate", "isocyanate_and_thiol_to_carbamothioate", "isothiocyanate_and_thiol_to_carbamodithioate", "alkene_to_epoxide", "halide_to_cyanide", "alcohol_to_cyanide", "carboxylate_to_cyanide", "acyl_halide_to_cyanide", "acid_anhydride_to_cyanide", "halide_to_azide", "alcohol_to_azide", "carboxylate_to_azide", "acyl_halide_to_azide", "acid_anhydride_to_azide", "amine_to_azide", "amine_to_isocyanate", "amine_to_isothiocyanate", "azide_to_amine", "thiol_and_alkene_to_thioether"]
+        kinds_of_reactions = ["azide_and_alkyne_to_azole", "epoxide_alcohol_opening", "epoxide_thiol_opening", "chloroformate_and_amine_to_carbamate", "sulfonyl_azide_and_thio_acid", "carboxylate_and_alcohol_to_ester", "carboxylate_and_thiol_to_thioester", "acyl_halide_and_alcohol_to_ester", "acyl_halide_and_thiol_to_thioester", "ester_and_alcohol_to_ester", "ester_and_thiol_to_thioester", "acid_anhydride_and_alcohol_to_ester", "acid_anhydride_and_thiol_to_thioester", "carboxylate_and_amine_to_amide", "acyl_halide_and_amine_to_amide", "ester_and_amine_to_amide", "acid_anhydride_and_amine_to_amide", "isocyanate_and_amine_to_urea", "isothiocyanate_and_amine_to_thiourea", "isocyanate_and_alcohol_to_carbamate", "isothiocyanate_and_alcohol_to_carbamothioate", "isocyanate_and_thiol_to_carbamothioate", "isothiocyanate_and_thiol_to_carbamodithioate", "alkene_to_epoxide", "halide_to_cyanide", "alcohol_to_cyanide", "carboxylate_to_cyanide", "acyl_halide_to_cyanide", "acid_anhydride_to_cyanide", "halide_to_azide", "alcohol_to_azide", "carboxylate_to_azide", "acyl_halide_to_azide", "acid_anhydride_to_azide", "amine_to_azide", "amine_to_isocyanate", "amine_to_isothiocyanate", "azide_to_amine", "thiol_and_alkene_to_thioether", "isonitrile_and_tetrazine"]
         
         self.__log_file_output("\nAutoClickChem " + self.version,log)
         self.__log_file_output("\nIf you use AutoClickChem in your research, please cite the following reference:",log)
