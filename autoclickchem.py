@@ -219,6 +219,7 @@ class StructureLocateGroups:
         """
         
         AlkeneRoots=[]
+        cs = set()
         
         for first_C_index in pdb.all_atoms:
             first_C = pdb.all_atoms[first_C_index]
@@ -252,6 +253,12 @@ class StructureLocateGroups:
                 
                 if not good:
                     continue
+
+                cs_el = tuple(sorted((first_C_index, second_C_index)))
+                if cs_el in cs:
+                    continue
+
+                cs.add(cs_el)
                 AlkeneRoots.append([first_C_index, rs_idx[0], rs_idx[1], second_C_index, rs_idx[2], rs_idx[3]])
         return AlkeneRoots
 
@@ -2673,6 +2680,7 @@ class OperatorsReact:
                     product = self.__diels_alder(pdb1_copy, pdb2_copy, reaction, 0)
                     product.remarks.append("diene + dienophile => cyclohexene (Diels-Alder)")
                     product.remarks.append("SOURCE FILES: " + pdb1_copy.filename + "; " + pdb2_copy.filename)
+                    product.remarks.append("REACTION: {} {}".format(reaction, 0))
                     products.append(product)
 
                     pdb1_copy = pdb1.copy_of()
@@ -2680,6 +2688,7 @@ class OperatorsReact:
                     product = self.__diels_alder(pdb1_copy, pdb2_copy, reaction, 1)
                     product.remarks.append("diene + dienophile => cyclohexene (Diels-Alder)")
                     product.remarks.append("SOURCE FILES: " + pdb1_copy.filename + "; " + pdb2_copy.filename)
+                    product.remarks.append("REACTION: {} {}".format(reaction, 1))
                     products.append(product)
 
                 # sulfonyl_azide - thio acid reactions
@@ -3510,22 +3519,168 @@ class OperatorsReact:
             alkene_R5_index = reaction[1][4]
             alkene_R6_index = reaction[1][5]
         
+        diene_rs = diene.split([diene_C1_index, diene_C2_index, diene_C3_index, diene_C4_index])
+        alkene_rs = alkene.split([alkene_C1_index, alkene_C4_index])
+
         # 5-ring
         if diene_R2_index == diene_R6_index:
-            # TODO (not implemented)
-            assert False
+            # load intermediate
+            intermediate = pymolecule.Molecule()
+            intermediate.load_pdb('.' + os.sep + 'intermediates.tmp' + os.sep + 'da5.pdb')
+
+            # now move the diene Rs
+            aligned_diene_rs = []
+            for r in diene_rs:
+                tethers = []
+                if diene_R1_index in r.all_atoms:
+                    tethers.extend([[2, diene_C1_index], [10, diene_R1_index]])
+                if diene_R3_index in r.all_atoms:
+                    tethers.extend([[6, diene_C2_index], [15, diene_R3_index]])
+                if diene_R4_index in r.all_atoms:
+                    tethers.extend([[5, diene_C3_index], [14, diene_R4_index]])
+                if diene_R5_index in r.all_atoms:
+                    tethers.extend([[4, diene_C4_index], [13, diene_R5_index]])
+                if diene_R2_index in r.all_atoms:
+                    tethers.extend([[3, diene_R2_index], [2, diene_C1_index], [4, diene_C4_index]])
+                assert len(tethers) <= 4
+                if len(tethers) == 4:
+                    tethers = [tethers[0], tethers[2], tethers[1]]
+                new_r = intermediate.align_another_molecule_to_this_one(r, tethers)
+                new_r.delete_atom(diene_C1_index)
+                new_r.delete_atom(diene_C2_index)
+                new_r.delete_atom(diene_C3_index)
+                new_r.delete_atom(diene_C4_index)
+                aligned_diene_rs.append(new_r)
+        
+            # now move the alkene Rs
+            int_idx = [1, 8, 9, 7, 17, 16]
+            if variant & 1:
+                int_idx = int_idx[3:] + int_idx[:3]
+            aligned_alkene_rs = []
+            for r in alkene_rs:
+                tethers = []
+                if alkene_R2_index in r.all_atoms:
+                    tethers.extend([[int_idx[0], alkene_C1_index], [int_idx[1], alkene_R2_index]])
+                if alkene_R3_index in r.all_atoms:
+                    tethers.extend([[int_idx[0], alkene_C1_index], [int_idx[2], alkene_R3_index]])
+                if alkene_R5_index in r.all_atoms:
+                    tethers.extend([[int_idx[3], alkene_C4_index], [int_idx[4], alkene_R5_index]])
+                if alkene_R6_index in r.all_atoms:
+                    tethers.extend([[int_idx[3], alkene_C4_index], [int_idx[5], alkene_R6_index]])
+                assert len(tethers) <= 4
+                if len(tethers) == 4:
+                    tethers = [tethers[0], tethers[2], tethers[1]]
+                new_r = intermediate.align_another_molecule_to_this_one(r, tethers)
+                new_r.delete_atom(alkene_C1_index)
+                new_r.delete_atom(alkene_C4_index)
+                aligned_alkene_rs.append(new_r)
+
+            # delete atoms
+            to_del = [k for k, v in intermediate.all_atoms.items() if v.element == "H"]
+            for idx in to_del:
+                intermediate.delete_atom(idx)
+            intermediate.delete_atom(3)
+
+            # change residue
+            intermediate.change_residue("FR0")
+            for r in aligned_diene_rs:
+                r.change_residue("FR1")
+            for r in aligned_alkene_rs:
+                r.change_residue("FR2")
+
+            # reduce hindrance
+            # TODO slow?
+            #self.structure_pdb_functions.reduce_steric_hindrance(rbonds)
+
+            build = intermediate
+            for r in aligned_diene_rs:
+                build = build.merge_with_another_molecule(r)
+            for r in aligned_alkene_rs:
+                build = build.merge_with_another_molecule(r)
+            return build
+
 
         # 6-ring
-        elif diene_R2_index in diene.all_atoms[diene_R2_index].indecies_of_atoms_connecting:
-            # TODO (not implemented)
-            assert False
+        elif diene_R2_index in diene.all_atoms[diene_R6_index].indecies_of_atoms_connecting:
+            # load intermediate
+            intermediate = pymolecule.Molecule()
+            intermediate.load_pdb('.' + os.sep + 'intermediates.tmp' + os.sep + 'da6.pdb')
+
+            # now move the diene Rs
+            aligned_diene_rs = []
+            for r in diene_rs:
+                tethers = []
+                if diene_R1_index in r.all_atoms:
+                    tethers.extend([[2, diene_C1_index], [11, diene_R1_index]])
+                if diene_R3_index in r.all_atoms:
+                    tethers.extend([[7, diene_C2_index], [18, diene_R3_index]])
+                if diene_R4_index in r.all_atoms:
+                    tethers.extend([[6, diene_C3_index], [17, diene_R4_index]])
+                if diene_R5_index in r.all_atoms:
+                    tethers.extend([[5, diene_C4_index], [16, diene_R5_index]])
+                if diene_R2_index in r.all_atoms:
+                    tethers.extend([[3, diene_R2_index], [4, diene_R6_index], [2, diene_C1_index]])
+                assert len(tethers) <= 4
+                if len(tethers) == 4:
+                    tethers = [tethers[0], tethers[2], tethers[1]]
+                new_r = intermediate.align_another_molecule_to_this_one(r, tethers)
+                new_r.delete_atom(diene_C1_index)
+                new_r.delete_atom(diene_C2_index)
+                new_r.delete_atom(diene_C3_index)
+                new_r.delete_atom(diene_C4_index)
+                aligned_diene_rs.append(new_r)
+        
+            # now move the alkene Rs
+            int_idx = [1, 9, 10, 8, 20, 19]
+            if variant & 1:
+                int_idx = int_idx[3:] + int_idx[:3]
+            aligned_alkene_rs = []
+            for r in alkene_rs:
+                tethers = []
+                if alkene_R2_index in r.all_atoms:
+                    tethers.extend([[int_idx[0], alkene_C1_index], [int_idx[1], alkene_R2_index]])
+                if alkene_R3_index in r.all_atoms:
+                    tethers.extend([[int_idx[0], alkene_C1_index], [int_idx[2], alkene_R3_index]])
+                if alkene_R5_index in r.all_atoms:
+                    tethers.extend([[int_idx[3], alkene_C4_index], [int_idx[4], alkene_R5_index]])
+                if alkene_R6_index in r.all_atoms:
+                    tethers.extend([[int_idx[3], alkene_C4_index], [int_idx[5], alkene_R6_index]])
+                assert len(tethers) <= 4
+                if len(tethers) == 4:
+                    tethers = [tethers[0], tethers[2], tethers[1]]
+                new_r = intermediate.align_another_molecule_to_this_one(r, tethers)
+                new_r.delete_atom(alkene_C1_index)
+                new_r.delete_atom(alkene_C4_index)
+                aligned_alkene_rs.append(new_r)
+
+            # delete atoms
+            to_del = [k for k, v in intermediate.all_atoms.items() if v.element == "H"]
+            for idx in to_del:
+                intermediate.delete_atom(idx)
+            intermediate.delete_atom(3)
+            intermediate.delete_atom(4)
+
+            # change residue
+            intermediate.change_residue("FR0")
+            for r in aligned_diene_rs:
+                r.change_residue("FR1")
+            for r in aligned_alkene_rs:
+                r.change_residue("FR2")
+
+            # reduce hindrance
+            # TODO
+            #self.structure_pdb_functions.reduce_steric_hindrance(rbonds)
+
+            build = intermediate
+            for r in aligned_diene_rs:
+                build = build.merge_with_another_molecule(r)
+            for r in aligned_alkene_rs:
+                build = build.merge_with_another_molecule(r)
+            return build
 
         else:
             # assuming there is no ring in diene
             # TODO: assert this
-
-            diene_rs = diene.split([diene_C1_index, diene_C2_index, diene_C3_index, diene_C4_index])
-            alkene_rs = alkene.split([alkene_C1_index, alkene_C4_index])
 
             # load intermediate
             intermediate = pymolecule.Molecule()
@@ -3608,7 +3763,7 @@ class OperatorsReact:
                 r.change_residue("FR2")
 
             # reduce hindrance
-            # TODO slow?
+            # TODO
             #self.structure_pdb_functions.reduce_steric_hindrance(rbonds)
 
             build = intermediate
@@ -6690,6 +6845,49 @@ class AutoClickChem:
         f.write("HETATM   15  H           1      -1.666   1.553   0.699  1.00  0.00           H  \n")
         f.write("HETATM   16  H           1      -1.444   1.425  -1.034  1.00  0.00           H  \n")
         f.close()
+        f = open('.' + os.sep + 'intermediates.tmp' + os.sep + 'da5.pdb','w')
+        f.write("HETATM    1  C           1       0.496   1.212   0.132  1.00  0.00           C  \n")
+        f.write("HETATM    2  C           1      -0.400   0.236   0.923  1.00  0.00           C  \n")
+        f.write("HETATM    3  C           1       0.629  -0.790   1.408  1.00  0.00           C  \n")
+        f.write("HETATM    4  C           1       1.107  -1.124  -0.008  1.00  0.00           C  \n")
+        f.write("HETATM    5  C           1      -0.229  -1.436  -0.643  1.00  0.00           C  \n")
+        f.write("HETATM    6  C           1      -1.135  -0.623  -0.080  1.00  0.00           C  \n")
+        f.write("HETATM    7  C           1       1.556   0.267  -0.500  1.00  0.00           C  \n")
+        f.write("HETATM    8  H           1       0.983   1.931   0.799  1.00  0.00           H  \n")
+        f.write("HETATM    9  H           1      -0.057   1.767  -0.633  1.00  0.00           H  \n")
+        f.write("HETATM   10  H           1      -1.025   0.678   1.700  1.00  0.00           H  \n")
+        f.write("HETATM   11  H           1       0.181  -1.645   1.931  1.00  0.00           H  \n")
+        f.write("HETATM   12  H           1       1.412  -0.354   2.038  1.00  0.00           H  \n")
+        f.write("HETATM   13  H           1       1.848  -1.921  -0.077  1.00  0.00           H  \n")
+        f.write("HETATM   14  H           1      -0.403  -2.146  -1.438  1.00  0.00           H  \n")
+        f.write("HETATM   15  H           1      -2.183  -0.547  -0.330  1.00  0.00           H  \n")
+        f.write("HETATM   16  H           1       1.575   0.348  -1.592  1.00  0.00           H  \n")
+        f.write("HETATM   17  H           1       2.552   0.514  -0.115  1.00  0.00           H  \n")
+        f.close()
+        f = open('.' + os.sep + 'intermediates.tmp' + os.sep + 'da6.pdb','w')
+        f.write("HETATM    1  C           1      -1.248   0.512  -0.924  1.00  0.00           C  \n")
+        f.write("HETATM    2  C           1      -1.210  -0.280   0.403  1.00  0.00           C  \n")
+        f.write("HETATM    3  C           1      -0.404  -1.575   0.155  1.00  0.00           C  \n")
+        f.write("HETATM    4  C           1       1.041  -1.224  -0.273  1.00  0.00           C  \n")
+        f.write("HETATM    5  C           1       1.209   0.311  -0.343  1.00  0.00           C  \n")
+        f.write("HETATM    6  C           1       0.817   0.865   1.013  1.00  0.00           C  \n")
+        f.write("HETATM    7  C           1      -0.432   0.556   1.400  1.00  0.00           C  \n")
+        f.write("HETATM    8  C           1       0.193   0.853  -1.374  1.00  0.00           C  \n")
+        f.write("HETATM    9  H           1      -1.822   1.439  -0.798  1.00  0.00           H  \n")
+        f.write("HETATM   10  H           1      -1.754  -0.070  -1.703  1.00  0.00           H  \n")
+        f.write("HETATM   11  H           1      -2.218  -0.500   0.765  1.00  0.00           H  \n")
+        f.write("HETATM   12  H           1      -0.885  -2.179  -0.624  1.00  0.00           H  \n")
+        f.write("HETATM   13  H           1      -0.380  -2.191   1.063  1.00  0.00           H  \n")
+        f.write("HETATM   14  H           1       1.263  -1.678  -1.246  1.00  0.00           H  \n")
+        f.write("HETATM   15  H           1       1.751  -1.653   0.446  1.00  0.00           H  \n")
+        f.write("HETATM   16  H           1       2.234   0.588  -0.607  1.00  0.00           H  \n")
+        f.write("HETATM   17  H           1       1.500   1.458   1.608  1.00  0.00           H  \n")
+        f.write("HETATM   18  H           1      -0.865   0.876   2.340  1.00  0.00           H  \n")
+        f.write("HETATM   19  H           1       0.385   0.420  -2.362  1.00  0.00           H  \n")
+        f.write("HETATM   20  H           1       0.298   1.940  -1.479  1.00  0.00           H  \n")
+        f.close()
+
+
 
     def __get_pdb_files(self, loc, log):
         """Generates a list of PDB files.
