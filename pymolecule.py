@@ -1128,6 +1128,42 @@ class Molecule:
     
         return newer_molecule
 
+    def __split_recursive_walk(self, v, marked):
+        marked.add(v)
+        ret = [v]
+        for i in self.all_atoms[v].indecies_of_atoms_connecting:
+            if i in marked:
+                continue
+            ret.extend(self.__split_recursive_walk(i, marked))
+        return ret
+
+    def split(self, idxs): # Split molecule in branches that you get after removing idxs
+        """Split molecule into pieces that you get after removing some atoms and then adding these atoms to each piece.
+        
+        Arguments:
+        idxs -- List of ints, indices of atoms to remove.
+        
+        Returns:
+        List of pymolecule.Molecule objects containing resulting pieces.
+        
+        """
+        marked = set(idxs)
+        ret = []
+        for idx in idxs:
+            for nbidx in self.all_atoms[idx].indecies_of_atoms_connecting:
+                if nbidx not in marked:
+                    new_idxs = self.__split_recursive_walk(nbidx, marked)
+                    new_idxs.sort()
+
+                    new_mol = Molecule()
+                    for nidx in new_idxs:
+                        new_mol.all_atoms[nidx] = self.all_atoms[nidx].copy_of()
+                    for nidx in idxs:
+                        new_mol.all_atoms[nidx] = self.all_atoms[nidx].copy_of()
+                    new_mol.regenerate_bonds()
+                    ret.append(new_mol)
+        return ret  
+
     def get_branch(self, index1, index2): # Get the branch starting with atom:index1 and moving in the direction of atom:index2
         """Identify an isolated "branch" of this molecular model.
         

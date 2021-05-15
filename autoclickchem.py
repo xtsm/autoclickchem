@@ -207,6 +207,55 @@ class StructureLocateGroups:
         return Alkene3HRoots
             
 
+    def index_of_alkene_nocheck(self, pdb):
+        """Same as index_of_alkene but does not ignore groups in rings.
+        
+        Arguments:
+        pdb -- A molecular model (pymolecule.Molecule).
+        
+        Returns:
+        A list of lists, where each list contains the indices (int) of the atoms present in an identified alkene group.
+        
+        """
+        
+        AlkeneRoots=[]
+        
+        for first_C_index in pdb.all_atoms:
+            first_C = pdb.all_atoms[first_C_index]
+            if first_C.element != "C" or first_C.number_of_neighbors() != 3:
+                continue
+            for second_C_index in first_C.indecies_of_atoms_connecting:
+                second_C = pdb.all_atoms[second_C_index]
+                if second_C.element != "C" or second_C.number_of_neighbors() != 3:
+                    continue
+                first_connectors = first_C.indecies_of_atoms_connecting[:]
+                second_connectors = second_C.indecies_of_atoms_connecting[:]
+
+                first_connectors.remove(second_C_index)
+                second_connectors.remove(first_C_index)
+
+                r2 = pdb.all_atoms[first_connectors[0]]
+                r5 = pdb.all_atoms[second_connectors[0]]
+
+                da = r2.coordinates.dihedral(first_C.coordinates, second_C.coordinates, r5.coordinates)
+                if abs(da) > 0.1:
+                    first_connectors = list(reversed(first_connectors))
+                
+                rs_idx = first_connectors + second_connectors
+                rs = [pdb.all_atoms[idx] for idx in rs_idx]
+
+                good = True
+                for r in rs:
+                    if r.element == "O" and r.number_of_neighbors() == 1:
+                        good = False
+                        break
+                
+                if not good:
+                    continue
+                AlkeneRoots.append([first_C_index, rs_idx[0], rs_idx[1], second_C_index, rs_idx[2], rs_idx[3]])
+        return AlkeneRoots
+
+
     def index_of_alkene(self, pdb): # identify alkenes (olefins)
         """Identifies all the alkene groups of a specified molecular model.
         
@@ -224,8 +273,10 @@ class StructureLocateGroups:
         #   /     \
         #  3       6
         
-        # unfortunately, this is going to mess up on things like -C=C-C=C-
+        # TODO: unfortunately, this is going to mess up on things like -C=C-C=C-
         # the middle two will be epoxidated incorrectly.
+
+        # TODO: split plain C = C detection into another function, this one does unnecessary ring checks
     
         AlkeneRoots=[]
         
@@ -1256,6 +1307,124 @@ class StructureLocateGroups:
     
         return Indices_of_secondary_amines 
     
+    def index_of_cis_butadiene(self, pdb):
+        """Identifies all the cis-butadiene groups of a specified molecular model.
+        
+        Arguments:
+        pdb -- A molecular model (pymolecule.Molecule).
+        
+        Returns:
+        A list of lists, where each list contains the indices (int) of the atoms present in an identified butadiene group.
+        
+        """
+        #        R3       R4
+        #          \     /
+        #          C2 - C3
+        #         //     \\
+        #   R1 - C1       C4 - R5
+        #          \     /
+        #          R2   R6
+
+        # TODO: distinguish from this one (and similar)
+        #
+        #     \     /
+        #      C = C
+        #     /     \
+        #  = C       C =
+        #     \     /
+
+        def lengthen_c_chain(pdb, cs_idx, k):
+            # Add k more atoms to carbon chain with atom indices cs_idx (no repeats).
+            # Returns list of lists, each list is of length len(cs_idx) + k, contains
+            # indices of atoms in lengthened chain.
+
+            if k == 0:
+                return [cs_idx]
+            c_last = pdb.all_atoms[cs_idx[-1]]
+            ans = []
+            for nb in c_last.indecies_of_atoms_connecting:
+                if nb in cs_idx:
+                    continue
+                c = pdb.all_atoms[nb]
+                if c.element != "C" or len(c.indecies_of_atoms_connecting) != 3:
+                    continue
+                new_list = cs_idx[:]
+                new_list.append(nb)
+                if k == 1:
+                    ans.append(new_list)
+                else:
+                    ans.extend(lengthen_c_chain(pdb, new_list, k - 1))
+            return ans
+        
+        # step 1: find all chains of 4 carbon atoms each of which has 3 neighbors
+        # and are roughly the needed shape
+        c4_chains = []
+        c4_sets = set()
+        for c1_idx in pdb.all_atoms:
+            c1 = pdb.all_atoms[c1_idx]
+            if c1.element != "C" or len(c1.indecies_of_atoms_connecting) != 3:
+                continue
+            for chain in lengthen_c_chain(pdb, [c1_idx], 3):
+                cset = tuple(sorted(chain[:]))
+                if cset in c4_sets:
+                    continue
+                c1, c2, c3, c4 = [pdb.all_atoms[idx] for idx in chain]
+                a1 = c1.coordinates.angle_between_three_points(c2.coordinates, c3.coordinates)
+                a2 = c2.coordinates.angle_between_three_points(c3.coordinates, c4.coordinates)
+                if abs(a1 - math.pi * 3 / 4) > 0.6 or abs(a2 - math.pi * 3 / 4) > 0.6:
+                    continue
+                da = c1.coordinates.dihedral(c2.coordinates, c3.coordinates, c4.coordinates)
+                if abs(da) > 0.1:
+                    continue
+                c4_sets.add(cset)
+                c4_chains.append(chain)
+
+        # step 2: determine Rs
+
+        ans = []
+        for chain in c4_chains:
+            c1_idx, c2_idx, c3_idx, c4_idx = chain
+            c1, c2, c3, c4 = [pdb.all_atoms[idx] for idx in chain]
+
+            r1r2 = c1.indecies_of_atoms_connecting[:]
+            r1r2.remove(c2_idx)
+            if abs(pdb.all_atoms[r1r2[0]].coordinates.dihedral(c1.coordinates, c2.coordinates, c3.coordinates)) < 0.1:
+                r1r2 = list(reversed(r1r2))
+            r1_idx, r2_idx = r1r2
+
+            r3 = c2.indecies_of_atoms_connecting[:]
+            r3.remove(c1_idx)
+            r3.remove(c3_idx)
+            r3_idx = r3[0]
+
+            r4 = c3.indecies_of_atoms_connecting[:]
+            r4.remove(c2_idx)
+            r4.remove(c4_idx)
+            r4_idx = r4[0]
+            
+            r5r6 = c4.indecies_of_atoms_connecting[:]
+            r5r6.remove(c3_idx)
+            if abs(pdb.all_atoms[r5r6[0]].coordinates.dihedral(c4.coordinates, c3.coordinates, c2.coordinates)) < 0.1:
+                r5r6 = list(reversed(r5r6))
+            r5_idx, r6_idx = r5r6
+
+            rchain = [r1_idx, r2_idx, r3_idx, r4_idx, r5_idx, r6_idx]
+            rs = [pdb.all_atoms[idx] for idx in rchain]
+
+            # TODO crutch, make it better (?)
+            good = True
+            for r in rs:
+                if r.element == "O" and len(r.indecies_of_atoms_connecting) == 1:
+                    good = False
+                    break
+            if not good:
+                continue
+
+            ans.append(chain + rchain)
+
+        return ans
+
+
     def index_of_tetrazine(self, pdb):
         """Identifies all the 1,2,4,5-tetrazine groups of a specified molecular model.
         
@@ -1460,7 +1629,7 @@ class OperatorsReact:
     
     # Here's where the click chemistry is simulated in silico
     
-    def react_molecules(self, pdb1, pdb2, allowed_reaction_types=["azide_and_alkyne_to_azole", "epoxide_alcohol_opening", "epoxide_thiol_opening", "chloroformate_and_amine_to_carbamate", "sulfonyl_azide_and_thio_acid", "carboxylate_and_alcohol_to_ester", "carboxylate_and_thiol_to_thioester", "acyl_halide_and_alcohol_to_ester", "acyl_halide_and_thiol_to_thioester", "ester_and_alcohol_to_ester", "ester_and_thiol_to_thioester", "acid_anhydride_and_alcohol_to_ester", "acid_anhydride_and_thiol_to_thioester", "carboxylate_and_amine_to_amide", "acyl_halide_and_amine_to_amide", "ester_and_amine_to_amide", "acid_anhydride_and_amine_to_amide", "isocyanate_and_amine_to_urea", "isothiocyanate_and_amine_to_thiourea", "isocyanate_and_alcohol_to_carbamate", "isothiocyanate_and_alcohol_to_carbamothioate", "isocyanate_and_thiol_to_carbamothioate", "isothiocyanate_and_thiol_to_carbamodithioate", "alkene_to_epoxide", "halide_to_cyanide", "alcohol_to_cyanide", "carboxylate_to_cyanide", "acyl_halide_to_cyanide", "acid_anhydride_to_cyanide", "halide_to_azide", "alcohol_to_azide", "carboxylate_to_azide", "acyl_halide_to_azide", "acid_anhydride_to_azide", "amine_to_azide", "amine_to_isocyanate", "amine_to_isothiocyanate", "azide_to_amine", "thiol_and_alkene_to_thioether", "isonitrile_and_tetrazine"]): # pdb1 is the one that will remain stable, pdb2 will be moved.
+    def react_molecules(self, pdb1, pdb2, allowed_reaction_types=["azide_and_alkyne_to_azole", "epoxide_alcohol_opening", "epoxide_thiol_opening", "chloroformate_and_amine_to_carbamate", "sulfonyl_azide_and_thio_acid", "carboxylate_and_alcohol_to_ester", "carboxylate_and_thiol_to_thioester", "acyl_halide_and_alcohol_to_ester", "acyl_halide_and_thiol_to_thioester", "ester_and_alcohol_to_ester", "ester_and_thiol_to_thioester", "acid_anhydride_and_alcohol_to_ester", "acid_anhydride_and_thiol_to_thioester", "carboxylate_and_amine_to_amide", "acyl_halide_and_amine_to_amide", "ester_and_amine_to_amide", "acid_anhydride_and_amine_to_amide", "isocyanate_and_amine_to_urea", "isothiocyanate_and_amine_to_thiourea", "isocyanate_and_alcohol_to_carbamate", "isothiocyanate_and_alcohol_to_carbamothioate", "isocyanate_and_thiol_to_carbamothioate", "isothiocyanate_and_thiol_to_carbamodithioate", "alkene_to_epoxide", "halide_to_cyanide", "alcohol_to_cyanide", "carboxylate_to_cyanide", "acyl_halide_to_cyanide", "acid_anhydride_to_cyanide", "halide_to_azide", "alcohol_to_azide", "carboxylate_to_azide", "acyl_halide_to_azide", "acid_anhydride_to_azide", "amine_to_azide", "amine_to_isocyanate", "amine_to_isothiocyanate", "azide_to_amine", "thiol_and_alkene_to_thioether", "isonitrile_and_tetrazine", "diels_alder"]): # pdb1 is the one that will remain stable, pdb2 will be moved.
         """Combines two molecular models into products according to the rules of click chemistry.
         
         Arguments:
@@ -1492,6 +1661,9 @@ class OperatorsReact:
         tetrazine_pdb1 = self.structure_locate_groups.index_of_tetrazine(pdb1)
         tetrazine_pdb2 = self.structure_locate_groups.index_of_tetrazine(pdb2)
     
+        cis_butadiene_pdb1 = self.structure_locate_groups.index_of_cis_butadiene(pdb1)
+        cis_butadiene_pdb2 = self.structure_locate_groups.index_of_cis_butadiene(pdb2)
+    
         sulfonyl_azide_pdb1 = self.structure_locate_groups.index_of_sulfonyl_azide(pdb1)
         sulfonyl_azide_pdb2 = self.structure_locate_groups.index_of_sulfonyl_azide(pdb2)
 
@@ -1504,6 +1676,9 @@ class OperatorsReact:
         alkene_3h_pdb1 = self.structure_locate_groups.index_of_alkene_3h(pdb1)
         alkene_3h_pdb2 = self.structure_locate_groups.index_of_alkene_3h(pdb2)
         
+        alkene_nocheck_pdb1 = self.structure_locate_groups.index_of_alkene_nocheck(pdb1)
+        alkene_nocheck_pdb2 = self.structure_locate_groups.index_of_alkene_nocheck(pdb2)
+
         epoxide_pdb1 = self.structure_locate_groups.index_of_epoxide(pdb1)
         epoxide_pdb2 = self.structure_locate_groups.index_of_epoxide(pdb2)
         
@@ -1593,6 +1768,15 @@ class OperatorsReact:
             for atoms1 in tetrazine_pdb1:
                 for atoms2 in isonitrile_pdb2:
                     possible_reactions.append(["TETRAZINE", atoms1, "ISONITRILE", atoms2])
+
+        if "diels_alder" in allowed_reaction_types:
+            for atoms1 in cis_butadiene_pdb1:
+                for atoms2 in alkene_nocheck_pdb2:
+                    possible_reactions.append(["CIS_BUTADIENE", atoms1, "ALKENE", atoms2])
+
+            for atoms1 in alkene_nocheck_pdb1:
+                for atoms2 in cis_butadiene_pdb2:
+                    possible_reactions.append(["ALKENE", atoms1, "CIS_BUTADIENE", atoms2])
 
         if "azide_and_alkyne_to_azole" in allowed_reaction_types: 
             
@@ -2483,6 +2667,21 @@ class OperatorsReact:
                     product.remarks.append("SOURCE FILES: " + pdb1_copy.filename + "; " + pdb2_copy.filename)
                     products.append(product)
 
+                elif (reaction[0] == "CIS_BUTADIENE" and reaction[2] == "ALKENE") or (reaction[0] == "ALKENE" and reaction[2] == "CIS_BUTADIENE"):
+                    pdb1_copy = pdb1.copy_of()
+                    pdb2_copy = pdb2.copy_of()
+                    product = self.__diels_alder(pdb1_copy, pdb2_copy, reaction, 0)
+                    product.remarks.append("diene + dienophile => cyclohexene (Diels-Alder)")
+                    product.remarks.append("SOURCE FILES: " + pdb1_copy.filename + "; " + pdb2_copy.filename)
+                    products.append(product)
+
+                    pdb1_copy = pdb1.copy_of()
+                    pdb2_copy = pdb2.copy_of()
+                    product = self.__diels_alder(pdb1_copy, pdb2_copy, reaction, 1)
+                    product.remarks.append("diene + dienophile => cyclohexene (Diels-Alder)")
+                    product.remarks.append("SOURCE FILES: " + pdb1_copy.filename + "; " + pdb2_copy.filename)
+                    products.append(product)
+
                 # sulfonyl_azide - thio acid reactions
                 elif (reaction[0] == "SULFONYL_AZIDE" and reaction[2] == "THIO_ACID") or (reaction[0] == "THIO_ACID" and reaction[2] == "SULFONYL_AZIDE"): # this one is updated
                     pdb1_copy = pdb1.copy_of()
@@ -3251,6 +3450,174 @@ class OperatorsReact:
         build = build.merge_with_another_molecule(tetrazine_r2)
         
         return build
+
+
+    def __diels_alder(self, pdb1, pdb2, reaction, variant):
+        """Simulates the Diels-Alder reaction between two molecules.
+        
+        Arguments:
+        pdb1 -- The first molecular model (pymolecule.Molecule), either a diene or a dienophile (alkene).
+        pdb2 -- The other molecular model (pymolecule.Molecule).
+        reaction -- A list identifying the reactive chemical groups and which atoms will participate in the reaction.
+        variant -- a bitmask for reaction options:
+            1 -- orientation of alkene (ortho/meta)
+        
+        Returns:
+        A pymolecule.Molecule model of the product.
+        
+        """
+
+        # First, identify which is which
+        if reaction[0] == "CIS_BUTADIENE" and reaction[2] == "ALKENE":
+            diene = pdb1
+            diene_C1_index = reaction[1][0]
+            diene_C2_index = reaction[1][1]
+            diene_C3_index = reaction[1][2]
+            diene_C4_index = reaction[1][3]
+            diene_R1_index = reaction[1][4]
+            diene_R2_index = reaction[1][5]
+            diene_R3_index = reaction[1][6]
+            diene_R4_index = reaction[1][7]
+            diene_R5_index = reaction[1][8]
+            diene_R6_index = reaction[1][9]
+            
+            alkene = pdb2
+            alkene_C1_index = reaction[3][0]
+            alkene_R2_index = reaction[3][1]
+            alkene_R3_index = reaction[3][2]
+            alkene_C4_index = reaction[3][3]
+            alkene_R5_index = reaction[3][4]
+            alkene_R6_index = reaction[3][5]
+        else:
+            assert reaction[2] == "CIS_BUTADIENE" and reaction[0] == "ALKENE"
+            diene = pdb2
+            diene_C1_index = reaction[3][0]
+            diene_C2_index = reaction[3][1]
+            diene_C3_index = reaction[3][2]
+            diene_C4_index = reaction[3][3]
+            diene_R1_index = reaction[3][4]
+            diene_R2_index = reaction[3][5]
+            diene_R3_index = reaction[3][6]
+            diene_R4_index = reaction[3][7]
+            diene_R5_index = reaction[3][8]
+            diene_R6_index = reaction[3][9]
+            
+            alkene = pdb1
+            alkene_C1_index = reaction[1][0]
+            alkene_R2_index = reaction[1][1]
+            alkene_R3_index = reaction[1][2]
+            alkene_C4_index = reaction[1][3]
+            alkene_R5_index = reaction[1][4]
+            alkene_R6_index = reaction[1][5]
+        
+        # 5-ring
+        if diene_R2_index == diene_R6_index:
+            # TODO (not implemented)
+            assert False
+
+        # 6-ring
+        elif diene_R2_index in diene.all_atoms[diene_R2_index].indecies_of_atoms_connecting:
+            # TODO (not implemented)
+            assert False
+
+        else:
+            # assuming there is no ring in diene
+            # TODO: assert this
+
+            diene_rs = diene.split([diene_C1_index, diene_C2_index, diene_C3_index, diene_C4_index])
+            alkene_rs = alkene.split([alkene_C1_index, alkene_C4_index])
+
+            # load intermediate
+            intermediate = pymolecule.Molecule()
+            intermediate.load_pdb('.' + os.sep + 'intermediates.tmp' + os.sep + 'cyclohexene.pdb')
+
+            # TODO more variants for flips
+            
+            # now move the diene Rs
+            aligned_diene_rs = []
+            for r in diene_rs:
+                tethers = []
+                if diene_R1_index in r.all_atoms:
+                    tethers.extend([[3, diene_C1_index], [11, diene_R1_index]])
+                if diene_R2_index in r.all_atoms:
+                    tethers.extend([[3, diene_C1_index], [12, diene_R2_index]])
+                if diene_R3_index in r.all_atoms:
+                    tethers.extend([[4, diene_C2_index], [13, diene_R3_index]])
+                if diene_R4_index in r.all_atoms:
+                    tethers.extend([[5, diene_C3_index], [14, diene_R4_index]])
+                if diene_R5_index in r.all_atoms:
+                    tethers.extend([[6, diene_C4_index], [15, diene_R5_index]])
+                if diene_R6_index in r.all_atoms:
+                    tethers.extend([[6, diene_C4_index], [16, diene_R6_index]])
+                assert len(tethers) <= 4
+                if len(tethers) == 4:
+                    tethers = [tethers[0], tethers[2], tethers[1]]
+                new_r = intermediate.align_another_molecule_to_this_one(r, tethers)
+                new_r.delete_atom(diene_C1_index)
+                new_r.delete_atom(diene_C2_index)
+                new_r.delete_atom(diene_C3_index)
+                new_r.delete_atom(diene_C4_index)
+                aligned_diene_rs.append(new_r)
+        
+            # now move the alkene Rs
+            int_idx = [1, 7, 8, 2, 10, 9]
+            if variant & 1:
+                int_idx = int_idx[3:] + int_idx[:3]
+            aligned_alkene_rs = []
+            for r in alkene_rs:
+                tethers = []
+                if alkene_R2_index in r.all_atoms:
+                    tethers.extend([[int_idx[0], alkene_C1_index], [int_idx[1], alkene_R2_index]])
+                if alkene_R3_index in r.all_atoms:
+                    tethers.extend([[int_idx[0], alkene_C1_index], [int_idx[2], alkene_R3_index]])
+                if alkene_R5_index in r.all_atoms:
+                    tethers.extend([[int_idx[3], alkene_C4_index], [int_idx[4], alkene_R5_index]])
+                if alkene_R6_index in r.all_atoms:
+                    tethers.extend([[int_idx[3], alkene_C4_index], [int_idx[5], alkene_R6_index]])
+                assert len(tethers) <= 4
+                if len(tethers) == 4:
+                    tethers = [tethers[0], tethers[2], tethers[1]]
+                new_r = intermediate.align_another_molecule_to_this_one(r, tethers)
+                new_r.delete_atom(alkene_C1_index)
+                new_r.delete_atom(alkene_C4_index)
+                aligned_alkene_rs.append(new_r)
+
+            #rbonds = []
+            #rbonds.append([diene_r1, diene_r1.all_atoms[diene_C1_index].coordinates, diene_r1.all_atoms[diene_R1_index].coordinates])
+            #rbonds.append([diene_r2, diene_r2.all_atoms[diene_C1_index].coordinates, diene_r2.all_atoms[diene_R2_index].coordinates])
+            #rbonds.append([diene_r3, diene_r3.all_atoms[diene_C2_index].coordinates, diene_r3.all_atoms[diene_R3_index].coordinates])
+            #rbonds.append([diene_r4, diene_r4.all_atoms[diene_C3_index].coordinates, diene_r4.all_atoms[diene_R4_index].coordinates])
+            #rbonds.append([diene_r5, diene_r5.all_atoms[diene_C4_index].coordinates, diene_r5.all_atoms[diene_R5_index].coordinates])
+            #rbonds.append([diene_r6, diene_r6.all_atoms[diene_C4_index].coordinates, diene_r6.all_atoms[diene_R6_index].coordinates])
+            #rbonds.append([alkene_r2, alkene_r2.all_atoms[alkene_C1_index].coordinates, alkene_r2.all_atoms[alkene_R2_index].coordinates])
+            #rbonds.append([alkene_r3, alkene_r3.all_atoms[alkene_C1_index].coordinates, alkene_r3.all_atoms[alkene_R3_index].coordinates])
+            #rbonds.append([alkene_r5, alkene_r5.all_atoms[alkene_C4_index].coordinates, alkene_r5.all_atoms[alkene_R5_index].coordinates])
+            #rbonds.append([alkene_r6, alkene_r6.all_atoms[alkene_C4_index].coordinates, alkene_r6.all_atoms[alkene_R6_index].coordinates])
+            #rbonds.append([intermediate])
+
+            # delete atoms
+            to_del = [k for k, v in intermediate.all_atoms.items() if v.element == "H"]
+            for idx in to_del:
+                intermediate.delete_atom(idx)
+
+            # change residue
+            intermediate.change_residue("FR0")
+            for r in aligned_diene_rs:
+                r.change_residue("FR1")
+            for r in aligned_alkene_rs:
+                r.change_residue("FR2")
+
+            # reduce hindrance
+            # TODO slow?
+            #self.structure_pdb_functions.reduce_steric_hindrance(rbonds)
+
+            build = intermediate
+            for r in aligned_diene_rs:
+                build = build.merge_with_another_molecule(r)
+            for r in aligned_alkene_rs:
+                build = build.merge_with_another_molecule(r)
+            return build
+
     
     def __thiol_alkene(self, pdb1, pdb2, reaction):
         """Simulates the reaction between a thiol and an alkene.
@@ -3316,6 +3683,8 @@ class OperatorsReact:
         alkene.delete_atom(alkene_H6_index)
         intermediate.delete_atom(5)
         intermediate.delete_atom(9)
+
+        # TODO: steric hindrance
     
         intermediate.change_residue('FR1')
         thiol.change_residue('FR2')
@@ -6303,6 +6672,24 @@ class AutoClickChem:
         f.write("HETATM    8  N03         0      -2.289   0.769  -2.413  1.00  0.00           N\n")
         f.write("HETATM    9  H07         0      -2.936  -2.578  -2.416  1.00  0.00           H\n")
         f.close()
+        f = open('.' + os.sep + 'intermediates.tmp' + os.sep + 'cyclohexene.pdb','w')
+        f.write("HETATM    1  C           1       0.388   1.437   0.106  1.00  0.00           C  \n")
+        f.write("HETATM    2  C           1       1.451   0.358  -0.099  1.00  0.00           C  \n")
+        f.write("HETATM    3  C           1       1.021  -1.105   0.009  1.00  0.00           C  \n")
+        f.write("HETATM    4  C           1      -0.448  -1.367   0.027  1.00  0.00           C  \n")
+        f.write("HETATM    5  C           1      -1.377  -0.417  -0.008  1.00  0.00           C  \n")
+        f.write("HETATM    6  C           1      -1.078   1.044  -0.074  1.00  0.00           C  \n")
+        f.write("HETATM    7  H           1       0.607   2.271  -0.575  1.00  0.00           H  \n")
+        f.write("HETATM    8  H           1       0.512   1.861   1.111  1.00  0.00           H  \n")
+        f.write("HETATM    9  H           1       2.258   0.533   0.626  1.00  0.00           H  \n")
+        f.write("HETATM   10  H           1       1.922   0.511  -1.079  1.00  0.00           H  \n")
+        f.write("HETATM   11  H           1       1.458  -1.544   0.913  1.00  0.00           H  \n")
+        f.write("HETATM   12  H           1       1.458  -1.656  -0.834  1.00  0.00           H  \n")
+        f.write("HETATM   13  H           1      -0.756  -2.412   0.066  1.00  0.00           H  \n")
+        f.write("HETATM   14  H           1      -2.430  -0.699   0.002  1.00  0.00           H  \n")
+        f.write("HETATM   15  H           1      -1.666   1.553   0.699  1.00  0.00           H  \n")
+        f.write("HETATM   16  H           1      -1.444   1.425  -1.034  1.00  0.00           H  \n")
+        f.close()
 
     def __get_pdb_files(self, loc, log):
         """Generates a list of PDB files.
@@ -6434,7 +6821,7 @@ class AutoClickChem:
         else:
             log = ""
         
-        kinds_of_reactions = ["azide_and_alkyne_to_azole", "epoxide_alcohol_opening", "epoxide_thiol_opening", "chloroformate_and_amine_to_carbamate", "sulfonyl_azide_and_thio_acid", "carboxylate_and_alcohol_to_ester", "carboxylate_and_thiol_to_thioester", "acyl_halide_and_alcohol_to_ester", "acyl_halide_and_thiol_to_thioester", "ester_and_alcohol_to_ester", "ester_and_thiol_to_thioester", "acid_anhydride_and_alcohol_to_ester", "acid_anhydride_and_thiol_to_thioester", "carboxylate_and_amine_to_amide", "acyl_halide_and_amine_to_amide", "ester_and_amine_to_amide", "acid_anhydride_and_amine_to_amide", "isocyanate_and_amine_to_urea", "isothiocyanate_and_amine_to_thiourea", "isocyanate_and_alcohol_to_carbamate", "isothiocyanate_and_alcohol_to_carbamothioate", "isocyanate_and_thiol_to_carbamothioate", "isothiocyanate_and_thiol_to_carbamodithioate", "alkene_to_epoxide", "halide_to_cyanide", "alcohol_to_cyanide", "carboxylate_to_cyanide", "acyl_halide_to_cyanide", "acid_anhydride_to_cyanide", "halide_to_azide", "alcohol_to_azide", "carboxylate_to_azide", "acyl_halide_to_azide", "acid_anhydride_to_azide", "amine_to_azide", "amine_to_isocyanate", "amine_to_isothiocyanate", "azide_to_amine", "thiol_and_alkene_to_thioether", "isonitrile_and_tetrazine"]
+        kinds_of_reactions = ["azide_and_alkyne_to_azole", "epoxide_alcohol_opening", "epoxide_thiol_opening", "chloroformate_and_amine_to_carbamate", "sulfonyl_azide_and_thio_acid", "carboxylate_and_alcohol_to_ester", "carboxylate_and_thiol_to_thioester", "acyl_halide_and_alcohol_to_ester", "acyl_halide_and_thiol_to_thioester", "ester_and_alcohol_to_ester", "ester_and_thiol_to_thioester", "acid_anhydride_and_alcohol_to_ester", "acid_anhydride_and_thiol_to_thioester", "carboxylate_and_amine_to_amide", "acyl_halide_and_amine_to_amide", "ester_and_amine_to_amide", "acid_anhydride_and_amine_to_amide", "isocyanate_and_amine_to_urea", "isothiocyanate_and_amine_to_thiourea", "isocyanate_and_alcohol_to_carbamate", "isothiocyanate_and_alcohol_to_carbamothioate", "isocyanate_and_thiol_to_carbamothioate", "isothiocyanate_and_thiol_to_carbamodithioate", "alkene_to_epoxide", "halide_to_cyanide", "alcohol_to_cyanide", "carboxylate_to_cyanide", "acyl_halide_to_cyanide", "acid_anhydride_to_cyanide", "halide_to_azide", "alcohol_to_azide", "carboxylate_to_azide", "acyl_halide_to_azide", "acid_anhydride_to_azide", "amine_to_azide", "amine_to_isocyanate", "amine_to_isothiocyanate", "azide_to_amine", "thiol_and_alkene_to_thioether", "isonitrile_and_tetrazine", "diels_alder"]
         
         self.__log_file_output("\nAutoClickChem " + self.version,log)
         self.__log_file_output("\nIf you use AutoClickChem in your research, please cite the following reference:",log)
